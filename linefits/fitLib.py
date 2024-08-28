@@ -1,4 +1,4 @@
-from __future__ import print_function, division, unicode_literals
+ from __future__ import print_function, division, unicode_literals
 import numpy as np
 import copy
 import scipy.optimize
@@ -40,7 +40,8 @@ def fgauss(x, center, sigma, amp):
     center = float(center)
     sigma = float(sigma)
     amp = float(amp)
-    return(amp * np.exp(-((x - center) / sigma) ** 2.))
+    #return(amp * np.exp(-((x - center) / sigma) ** 2.)) # typo fixed 8-28-2024
+    return(amp * np.exp(-(x - center)**2. / (2. * sigma**2.)))
 
 
 def fgauss_const(x, center, sigma, amp, offset):
@@ -65,8 +66,8 @@ def fgauss_const(x, center, sigma, amp, offset):
     sigma = float(sigma)
     amp = float(amp)
     offset = float(offset)
-    return(float(amp) * np.exp(-((x - center) / sigma) ** 2.) + offset)
-
+    #return(float(amp) * np.exp(-((x - center) / sigma) ** 2.) + offset)
+    return(amp * np.exp(-(x - center)**2. / (2. * sigma**2.)) + offset)
 
 def fgauss_line(x, center, sigma, amp, offset, slope):
     """Gaussian + line function.
@@ -93,7 +94,8 @@ def fgauss_line(x, center, sigma, amp, offset, slope):
     amp = float(amp)
     offset = float(offset)
     slope = float(slope)
-    return(float(amp) * np.exp(-((x - center) / sigma) ** 2.) + offset + x * slope)
+    #return(float(amp) * np.exp(-((x - center) / sigma) ** 2.) + offset + x * slope)
+    return(amp * np.exp(-(x - center)**2. / (2. * sigma**2.)) + offset + x * slope)
 
 def fgauss_from_1(x, center, sigma, amp):
     """Gaussian + offset function.
@@ -115,8 +117,8 @@ def fgauss_from_1(x, center, sigma, amp):
     sigma = float(sigma)
     amp = float(amp)
     offset = 1.
-    return(float(amp) * np.exp(-((x - center) / sigma) ** 2.) + offset)
-
+    #return(float(amp) * np.exp(-((x - center) / sigma) ** 2.) + offset)
+    return(amp * np.exp(-(x - center)**2. / (2. * sigma**2.)) + offset)
 
 def discretize_oversample(func, x, *args, **kwargs):
     """Upsample a function.

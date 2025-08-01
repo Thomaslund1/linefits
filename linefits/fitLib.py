@@ -14,58 +14,87 @@ import datetime
 import astropy
 import astropy.time
 from packaging import version
-import pickle
-import matplotlib.pyplot as plt
-from NeidLsf import *
+try: #Packages needed for LSF 
+    from NeidLsf import *
+    import pickle
+except:
+    pass
 
 """ This is a library of functions that are called in the
 wavelength calibration.
 
 """
 
-def diff(x1, y1, x2, y2):
-    interp = scipy.interpolate.interp1d(x1, y1, bounds_error=False, fill_value=0)
-    y1_interp = interp(x2)
-    residuals = y1_interp - y2
-    return np.nanmean(residuals**2)
     
 def ampAndOffset(params, xin, yin, xRef, yRef):
+    '''
+    A cost evaluation function to be used in conjuntion with 
+    scipy.optimize.minimize to fit scatter plots of data to each other 
+    with paramaters from params
+
+    Paramater
+    ---------
+    params : unpackable, (2,)
+        Paramater set containing xOffset and width values to test
+    xin : array
+        Unmodified x data that is being fit to the reference data
+        Should be centered around zero
+    yin : array
+        Noramlized to 1 y data corresponding to xin
+    xRef : array
+        Reference x data 
+    yRef : array
+        Normalized to 1 y data
+
+    Returns
+    --------
+    cost : float
+        the cost of this fit calculated from the residuals
+    ''' 
     xOffset, width = params
     xin_trans = (width * xin) + xOffset
     interp = scipy.interpolate.interp1d(xin_trans, yin, kind='cubic', bounds_error=False, fill_value=0)
     yRef_interp = interp(xRef)
     residuals = yRef_interp - yRef
     cost = np.nanmean(residuals ** 2)
-    #fig = plt.figure()
-    #plt.plot(xin_trans,yin,label='yin')
-    #plt.plot(xRef,yRef,label='yRef')
-    #plt.plot(xRef,yRef_interp,label='yInterp')
-    #plt.legend()
-    #print(f'xIn{xin_trans[0]}:{xin_trans[-1]} and xRef:{xRef[0]}:{xRef[-1]}')
-    #print(f'xOff:{params[0]}  Width:{params[1]}  Cost:{cost}')
     return cost
 
 
-with open("NEID_LSFMODEL_HR_SCI", "rb") as f:
-    LSF_MODEL_SCI = NeidLSFModel(pickle.load(f))
-
-with open("NEID_LSFMODEL_HR_CAL", "rb") as f:
-    LSF_MODEL_CAL = NeidLSFModel(pickle.load(f))
-
-
-LSF_MODEL_CAL_ET = np.load('EtalonPeakProfilesCal.npy',allow_pickle=1)[()]
-
 
 def getLsf(echelle_order, pixel_idx, numPix=0,fiber='CAL',src = 'LFC',peakNum = 0): 
-    if src == 'LFC':
-        if(fiber == 'SCI'):
-            pixels, lsf = LSF_MODEL_SCI.lsf_model(echelle_order, pixel_idx)
-        elif(fiber=='CAL'):
-            pixels, lsf = LSF_MODEL_CAL.lsf_model(echelle_order, pixel_idx)
+    '''
+    Function to return the LSF prediction for a given LFC pixel, or to return the peak profile of a different source if one is provided
 
-    elif (src == 'Etalon'):
+    Paramaters:
+    ------------
+    echelle_order : int
+        Which order the profile is in
+    Pixel_inx : int
+        Which pixel to return a profile for, +- 100 pixels or so is usually fine
+    numPix : int
+        Optional resampling number, disabled at zero
+    fiber : str
+        Which instrumental fiber to return a peak for
+        typically "SCI","CAL", or "SKY"
+    src : str
+        What cal source to return a peak for, LSF only really 
+        works on LFC, so if Etalon is provided you must 
+        provide a calculated set of peak profiles 
+    peakNum : int
+        If using a dictionary of modes with peak profiles, 
+        the index of the peak profile to return
+    '''
+    if(src=='LFC'):
+        with open(f'NEID_LSFMODEL_HR_{fiber}', "rb") as f:
+            LSF_MODEL = NeidLSFModel(pickle.load(f))
+        pixels, lsf = LSF_MODEL.lsf_model(echelle_order, pixel_idx)
+    elif(src=='Etalon'):
+        #Experimimental; provide a npy file containing an oDict in shape
+        #(order,peakNumber,300) where the final dimension is the y values 
+        #For an evenly sampled peak profile for each peak
+        LSF_MODEL_ET = np.load('EtalonPeakProfiles.npy',allow_pickle=1)[()]
         pixels = np.linspace(-6,6,300)
-        lsf = LSF_MODEL_CAL_ET[echelle_order][peakNum]
+        lsf = LSF_MODEL_ET[echelle_order][peakNum]
     else:
         raise ValueError('Invalid instrument source')
     if numPix:
@@ -329,7 +358,17 @@ def fitProfile(inp_x, inp_y, fit_center_in, order, fit_width=8, sigma=None,
         Output the fit residuals (the default is False)
     p0 : list of first-guess coefficients. The fit can be quite sensitive to these
         choices.
-    bounds : Directly sent to scipy.optimize.curve_fit()
+    bounds : 2D Sequence
+        Directly sent to scipy.optimize.curve_fit()
+    fiber : str
+        which fiber the peak comes from, does not change anything 
+        but is passed to the LSF function if enabled
+    source : str
+        what calibration source is being used, does not change 
+        anything but is paseed to LSF function if enabled
+    peakNum : int
+        which mode is being evaluated, does not change anything 
+        but is passed to the LSF funciton if enabled
 
 
     Returns

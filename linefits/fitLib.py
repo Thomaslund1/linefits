@@ -14,11 +14,78 @@ import datetime
 import astropy
 import astropy.time
 from packaging import version
+import pickle
+import matplotlib.pyplot as plt
+from NeidLsf import *
 
 """ This is a library of functions that are called in the
 wavelength calibration.
 
 """
+
+def diff(x1, y1, x2, y2):
+    interp = scipy.interpolate.interp1d(x1, y1, bounds_error=False, fill_value=0)
+    y1_interp = interp(x2)
+    residuals = y1_interp - y2
+    return np.nanmean(residuals**2)
+    
+def ampAndOffset(params, xin, yin, xRef, yRef):
+    xOffset, width = params
+    xin_trans = (width * xin) + xOffset
+    interp = scipy.interpolate.interp1d(xin_trans, yin, kind='cubic', bounds_error=False, fill_value=0)
+    yRef_interp = interp(xRef)
+    residuals = yRef_interp - yRef
+    cost = np.nanmean(residuals ** 2)
+    #fig = plt.figure()
+    #plt.plot(xin_trans,yin,label='yin')
+    #plt.plot(xRef,yRef,label='yRef')
+    #plt.plot(xRef,yRef_interp,label='yInterp')
+    #plt.legend()
+    #print(f'xIn{xin_trans[0]}:{xin_trans[-1]} and xRef:{xRef[0]}:{xRef[-1]}')
+    #print(f'xOff:{params[0]}  Width:{params[1]}  Cost:{cost}')
+    return cost
+
+
+with open("NEID_LSFMODEL_HR_SCI", "rb") as f:
+    LSF_MODEL_SCI = NeidLSFModel(pickle.load(f))
+
+with open("NEID_LSFMODEL_HR_CAL", "rb") as f:
+    LSF_MODEL_CAL = NeidLSFModel(pickle.load(f))
+
+
+LSF_MODEL_CAL_ET = np.load('EtalonPeakProfilesCal.npy',allow_pickle=1)[()]
+
+
+def getLsf(echelle_order, pixel_idx, numPix=0,fiber='CAL',src = 'LFC',peakNum = 0): 
+    if src == 'LFC':
+        if(fiber == 'SCI'):
+            pixels, lsf = LSF_MODEL_SCI.lsf_model(echelle_order, pixel_idx)
+        elif(fiber=='CAL'):
+            pixels, lsf = LSF_MODEL_CAL.lsf_model(echelle_order, pixel_idx)
+
+    elif (src == 'Etalon'):
+        pixels = np.linspace(-6,6,300)
+        lsf = LSF_MODEL_CAL_ET[echelle_order][peakNum]
+    else:
+        raise ValueError('Invalid instrument source')
+    if numPix:
+        # Generate a new pixel grid linearly spaced between min and max of the original
+        pixel_min, pixel_max = pixels[0], pixels[-1]
+        pixels_new = np.linspace(pixel_min, pixel_max, numPix)
+        
+        # Interpolate LSF to the new pixel grid
+        interp_lsf = scipy.interpolate.interp1d(pixels, lsf, kind='cubic', bounds_error=False, fill_value=0)
+        lsf_new = interp_lsf(pixels_new)
+        
+        pixels = pixels_new
+        lsf = lsf_new
+
+    # Normalize
+    lsf = np.array(lsf) / np.max(lsf)
+    
+    return np.array(pixels), lsf
+
+            
 
 
 def fgauss(x, center, sigma, amp):
@@ -236,8 +303,8 @@ def rescale(x, oldmin, oldmax, newmin, newmax):
 
 
 
-def fitProfile(inp_x, inp_y, fit_center_in, fit_width=8, sigma=None,
-               func='fgauss_const', return_residuals=False,p0=None,bounds=(-np.inf,np.inf)):
+def fitProfile(inp_x, inp_y, fit_center_in, order, fit_width=8, sigma=None,
+               func='LSF', return_residuals=False,p0=None,bounds=(-np.inf,np.inf),fiber='CAL',source='LFC',peakNum=0):
     """Perform a least-squares fit to a peak-like function.
 
     Parameters
@@ -283,18 +350,40 @@ def fitProfile(inp_x, inp_y, fit_center_in, fit_width=8, sigma=None,
     """
 
     # select out the region to fit
-    # this will be only consistent to +- integer pixels
+    # this will be only consistent to +- integer pixels 
     fit_center = copy.copy(fit_center_in)
     xx_index = np.arange(len(inp_x))
     assert len(inp_x) == len(inp_y)
+    try:
+        j1 = int(np.round(np.amax([0, fit_center - fit_width])))
+        j2 = int(round(np.amin([np.amax(xx_index), fit_center + fit_width])))
+    except:
+        retval = {'centroid': np.nan,
+              'e_centroid': np.nan,
+              'sigma': np.nan,
+              'e_sigma': np.nan,
+              'nanflag': np.nan,
+              'pcov': np.nan,
+              'popt': np.nan,
+              'indices_used': (np.nan, np.nan),
+              'function_used': np.nan,
+              'tot_counts_in_line': np.nan,
+              'fit_successful': np.nan,
+              'scale_value':np.nan}
+        if return_residuals:
+            if fit_successful:
+                predicted = np.nan
+                residuals = np.nan
+            else:
+                residuals = np.nan
+            retval['residuals'] = residuals
     
-    j1 = int(np.round(np.amax([0, fit_center - fit_width])))
-    j2 = int(round(np.amin([np.amax(xx_index), fit_center + fit_width])))
+        #return(retval['popt'][0], retval['popt'][1], retval['popt'][2], retval)
+        return(retval)
 
     # define sub-arrays to fit
     sub_x1 = inp_x[j1:j2]
     sub_y1 = inp_y[j1:j2]
-
     tot_counts_in_line = float(np.nansum(sub_y1))
 
     # normalize the sub-array
@@ -307,6 +396,8 @@ def fitProfile(inp_x, inp_y, fit_center_in, fit_width=8, sigma=None,
     # select out the finite elements
     ii_good = np.isfinite(sub_y_norm1)
     sub_x = sub_x1[ii_good]
+    if len(sub_x) < 2:
+        raise Exception('fitting Err')
     sub_y_norm = sub_y_norm1[ii_good]
     if sigma is not None:
         sub_sigma1 = sigma[j1:j2]
@@ -343,10 +434,86 @@ def fitProfile(inp_x, inp_y, fit_center_in, fit_width=8, sigma=None,
         if p0 is None:
             p0 = (np.mean(sub_x),1., -np.ptp(sub_y_norm))
         use_function = fgauss_from_1
+    elif func == 'LSF':
+        if p0 == None:
+            p0 = (int(fit_center_in)+1,1)
     else:
+        print(func)
         raise ValueError
 
     # perform the least squares fit
+    if func == 'LSF':
+       
+        # Run minimization
+        bounds = ((p0[0]-3,p0[0]+3),(0.8,1.2))
+
+        xRef = sub_x
+        # Template LSF shape
+        xin,yin = getLsf(order, int(fit_center_in), 100,fiber,source,peakNum)
+        yRef = sub_y_norm
+        yin = np.array(yin)
+        yin -= np.min(yin)
+        yin /= np.max(yin)
+        yRef -= np.min(yRef)
+        yRef /= np.max(yRef)
+        # Fit model to data
+        def cost_fn(params):
+            return ampAndOffset(params, xin, yin, xRef, yRef)
+
+        result = scipy.optimize.minimize(cost_fn,
+                                         x0=p0,
+                                         method='Powell',
+                                         bounds=bounds)
+        popt = result.x
+        fit_successful = result.success
+        
+        # Apply best-fit transform
+        xin_trans = (popt[1]*xin) + popt[0]
+        yin_trans = yin
+        interp = scipy.interpolate.interp1d(xRef, yRef, kind='cubic', bounds_error=False, fill_value=0)
+        #yRef_interp = interp(xin_trans)
+        yRef_interp = np.interp(xin_trans,xRef,yRef)
+        # Compute residuals and SNR
+        residuals = yin_trans - yRef_interp
+        resid_std = np.nanstd(residuals)
+        snr_est = 1 / resid_std if resid_std > 0 else np.nan
+        
+        # Estimate effective width in pixels
+        template_area = np.nansum(yin)
+        template_peak = np.nanmax(yin)
+        effective_width_pix = template_area / template_peak if template_peak > 0 else np.nan
+        
+        # Estimate number of pixels contributing meaningfully
+        above_thresh = np.abs(yin) > 0.05 * template_peak
+        neff = np.sum(above_thresh)
+        neff = max(neff, 1)
+        
+        # Estimate centroid precision from SNR
+        centroid_error = effective_width_pix / (snr_est * np.sqrt(neff))
+        
+        # Result values
+        centroid = popt[0]
+        
+        retval = {
+            'centroid': centroid,
+            'e_centroid': centroid_error,
+            'sigma': popt[1],  # Just a placeholder if needed
+            'e_sigma': np.nan,
+            'nanflag': nanflag,
+            'pcov': None,
+            'popt': popt.tolist(),
+            'indices_used': (j1, j2),
+            'function_used': func,
+            'tot_counts_in_line': tot_counts_in_line,
+            'fit_successful': fit_successful,
+            'scale_value': float(popt[0]),
+            'snr_peak': snr_est
+        }
+        
+        if return_residuals:
+            retval['residuals'] = residuals.tolist()
+
+        return retval
     try:
         popt, pcov = scipy.optimize.curve_fit(use_function,
                                               sub_x,
@@ -484,8 +651,8 @@ def subtract_Continuum_fromlines(inputspec,refspec=None,thresh_mask=None,thresh_
     return outspec, Continuum, ThresholdMask
 
 
-def fit_lines_order(xx,fl,peak_locs,sigma=None,wl=None,pix_to_wvl=None,pix_to_wvl_per_pix=None,fitfunction='fgauss_const',
-                    fit_width_pix=8,basic_window_check=True):
+def fit_lines_order(xx,fl,peak_locs,order,sigma=None,wl=None,pix_to_wvl=None,pix_to_wvl_per_pix=None,fitfunction='LSF',
+                    fit_width_pix=8,basic_window_check=True,fiber='CAL',src='LFC'):
     """ Fit all peaks in an order
 
     This is a wrapper for the fitProfile function to do the (often used) task of repeated fitting of many lines
@@ -557,13 +724,15 @@ def fit_lines_order(xx,fl,peak_locs,sigma=None,wl=None,pix_to_wvl=None,pix_to_wv
             p0 = [loc_this,2.5,1.,0.,0.]
         elif fitfunction == 'fgauss':
             p0 = [loc_this,2.1,1.]
+        elif fitfunction == 'LSF':
+            p0 = None
         else:
             raise ValueError
         
         try:
-            tmp = fitProfile(xx,fl,loc_this,fit_width=fit_width_pix,sigma=sigma,
-                                                    func=fitfunction,p0=p0)
-        except (RuntimeError, ValueError, RuntimeWarning) as e:
+            tmp = fitProfile(xx,fl,loc_this,order,fit_width=fit_width_pix,sigma=sigma,
+                                                    func=fitfunction,p0=p0,fiber = fiber,source=src,peakNum=mi)
+        except (RuntimeError, ValueError, RuntimeWarning, Exception) as e:
             tmp = OrderedDict()
             tmp['fit_successful'] = False
             tmp['sigma'] = np.NaN
@@ -576,8 +745,9 @@ def fit_lines_order(xx,fl,peak_locs,sigma=None,wl=None,pix_to_wvl=None,pix_to_wv
 
         if basic_window_check:
             check_val = np.abs(loc_this - float(centroid_pix))
+            
             if check_val > fit_width_pix:
-                centroid_pix = np.nan
+                #centroid_pix = np.nan
                 tmp['fit_successful'] = False
 
         if wl is not None:
@@ -597,7 +767,6 @@ def fit_lines_order(xx,fl,peak_locs,sigma=None,wl=None,pix_to_wvl=None,pix_to_wv
             fwhm_wl = np.NaN
             fwhm_vel = np.NaN
             peak_counts = np.NaN
-
         out1 = OrderedDict()
         out1['fit_output'] = tmp
         out1['centroid_pix'] = centroid_pix
@@ -606,7 +775,6 @@ def fit_lines_order(xx,fl,peak_locs,sigma=None,wl=None,pix_to_wvl=None,pix_to_wv
         out1['fwhm_wl'] = fwhm_wl
         out1['snr_peak'] = np.sqrt(peak_counts)
         out1['prec_est'] = 0.4 * fwhm_vel / (np.sqrt(fwhm_pix) * np.sqrt(peak_counts))
-
         #print(mi)
         #if mi == 89:
         #    print(out1)

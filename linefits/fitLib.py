@@ -14,6 +14,8 @@ import datetime
 import astropy
 import astropy.time
 from packaging import version
+import pickle
+import matplotlib.pyplot as plt
 try: #Packages needed for LSF 
     from NeidLsf import *
     import pickle

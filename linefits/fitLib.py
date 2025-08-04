@@ -509,12 +509,13 @@ def fitProfile(inp_x, inp_y, fit_center_in, order, fit_width=8, sigma=None,
         # Apply best-fit transform
         xin_trans = (popt[1]*xin) + popt[0]
         yin_trans = yin
-        interp = scipy.interpolate.interp1d(xRef, yRef, kind='cubic', bounds_error=False, fill_value=0)
+        #interp = scipy.interpolate.interp1d(xRef, yRef, kind='cubic', bounds_error=False, fill_value=0)
         #yRef_interp = interp(xin_trans)
         yRef_interp = np.interp(xin_trans,xRef,yRef)
         # Compute residuals and SNR
         residuals = yin_trans - yRef_interp
         resid_std = np.nanstd(residuals)
+        # We normalize to 1, so signal/noise := ~1/noise
         snr_est = 1 / resid_std if resid_std > 0 else np.nan
         
         # Estimate effective width in pixels
@@ -532,11 +533,11 @@ def fitProfile(inp_x, inp_y, fit_center_in, order, fit_width=8, sigma=None,
         
         # Result values
         centroid = popt[0]
-        
+        sigma = effective_width_pix / 16
         retval = {
             'centroid': centroid,
             'e_centroid': centroid_error,
-            'sigma': popt[1],  # Just a placeholder if needed
+            'sigma': sigma,
             'e_sigma': np.nan,
             'nanflag': nanflag,
             'pcov': None,
@@ -545,7 +546,7 @@ def fitProfile(inp_x, inp_y, fit_center_in, order, fit_width=8, sigma=None,
             'function_used': func,
             'tot_counts_in_line': tot_counts_in_line,
             'fit_successful': fit_successful,
-            'scale_value': float(popt[0]),
+            'scale_value': scale_value,
             'snr_peak': snr_est
         }
         

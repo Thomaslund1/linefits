@@ -92,7 +92,7 @@ def getLsf(echelle_order, pixel_idx, numPix=0,fiber='CAL',src = 'LFC',peakNum = 
         #Experimimental; provide a npy file containing an oDict in shape
         #(order,peakNumber,300) where the final dimension is the y values 
         #For an evenly sampled peak profile for each peak
-        LSF_MODEL_ET = np.load('EtalonPeakProfiles.npy',allow_pickle=1)[()]
+        LSF_MODEL_ET = np.load('PeakProfiles.npy',allow_pickle=1)[()]
         pixels = np.linspace(-6,6,300)
         lsf = LSF_MODEL_ET[echelle_order][peakNum]
     else:
